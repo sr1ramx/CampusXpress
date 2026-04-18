@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { supabase } from "../services/supabase";
 
 const AuthContext = createContext(null);
 
@@ -21,6 +22,29 @@ export function AuthProvider({ children }) {
     }
   }, [token, user]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const syncSession = async () => {
+      if (!supabase) {
+        return;
+      }
+
+      const { data } = await supabase.auth.getSession();
+      if (isMounted && !data.session && token) {
+        localStorage.removeItem("cx_token");
+        localStorage.removeItem("cx_user");
+        setToken("");
+        setUser(null);
+      }
+    };
+
+    syncSession();
+    return () => {
+      isMounted = false;
+    };
+  }, [token]);
+
   const login = (authToken, authUser) => {
     localStorage.setItem("cx_token", authToken);
     localStorage.setItem("cx_user", JSON.stringify(authUser));
@@ -34,6 +58,9 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
+    if (supabase) {
+      supabase.auth.signOut().catch(() => {});
+    }
     localStorage.removeItem("cx_token");
     localStorage.removeItem("cx_user");
     setToken("");

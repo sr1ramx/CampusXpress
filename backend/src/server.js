@@ -19,6 +19,14 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "8mb" }));
 
+app.get("/", (req, res) => {
+  res.json({
+    status: "ok",
+    app: "CampusXpress API",
+    message: "Backend is running. Use /api/health for health checks.",
+  });
+});
+
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", app: "CampusXpress API" });
 });

@@ -1,6 +1,20 @@
 import { useState } from "react";
-import api from "../services/api";
+import { supabase } from "../services/supabase";
 import { useLanguage } from "../context/LanguageContext";
+
+const formatAuthError = (message = "") => {
+  const normalized = String(message).toLowerCase();
+
+  if (normalized.includes("email rate limit exceeded")) {
+    return "Too many signup attempts. Wait a minute and try again, or login if this account already exists.";
+  }
+
+  if (normalized.includes("user already registered") || normalized.includes("already registered")) {
+    return "This email is already registered. Please use login.";
+  }
+
+  return message || "Authentication failed";
+};
 
 function AuthPage({ onLogin }) {
   const { language, switchLanguage, t, availableLanguages } = useLanguage();
@@ -10,13 +24,130 @@ function AuthPage({ onLogin }) {
 
   const submit = async (event) => {
     event.preventDefault();
+    setError("");
+
+    if (!supabase) {
+      setError("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+      return;
+    }
+
     try {
-      const endpoint = isSignup ? "/auth/signup" : "/auth/login";
-      const payload = isSignup ? { ...form, language } : { email: form.email, password: form.password };
-      const response = await api.post(endpoint, payload);
-      onLogin(response.data.token, response.data.user);
+      if (isSignup) {
+        const signUpResult = await supabase.auth.signUp({
+          email: form.email,
+          password: form.password,
+          options: {
+            data: {
+              name: form.name,
+              phone: form.phone,
+              role: form.role,
+              language
+            }
+          }
+        });
+
+        if (signUpResult.error) {
+          throw signUpResult.error;
+        }
+
+        const session = signUpResult.data.session;
+        const authUser = signUpResult.data.user;
+
+        if (!authUser) {
+          throw new Error("Unable to create user");
+        }
+
+        if (!session) {
+          throw new Error("Signup succeeded. Please verify email, then login.");
+        }
+
+        const profileInsert = await supabase
+          .from("profiles")
+          .upsert({
+            id: authUser.id,
+            name: form.name,
+            email: form.email,
+            role: form.role,
+            phone: form.phone || "",
+            language,
+            preferences: {
+              notifications: true,
+              darkMode: false,
+              accountPreferences: ""
+            }
+          })
+          .select("*")
+          .single();
+
+        if (profileInsert.error) {
+          throw profileInsert.error;
+        }
+
+        const profile = profileInsert.data;
+        onLogin(session.access_token, {
+          id: profile.id,
+          name: profile.name,
+          email: profile.email,
+          role: profile.role,
+          points: profile.points,
+          phone: profile.phone,
+          language: profile.language,
+          preferences: profile.preferences
+        });
+        return;
+      }
+
+      const loginResult = await supabase.auth.signInWithPassword({
+        email: form.email,
+        password: form.password
+      });
+
+      if (loginResult.error) {
+        throw loginResult.error;
+      }
+
+      const session = loginResult.data.session;
+      const authUser = loginResult.data.user;
+
+      if (!session || !authUser) {
+        throw new Error("Authentication failed");
+      }
+
+      const profileSelect = await supabase.from("profiles").select("*").eq("id", authUser.id).single();
+
+      let profile = profileSelect.data;
+      if (profileSelect.error) {
+        const fallbackInsert = await supabase
+          .from("profiles")
+          .insert({
+            id: authUser.id,
+            name: authUser.user_metadata?.name || authUser.email,
+            email: authUser.email,
+            role: authUser.user_metadata?.role || "user",
+            phone: authUser.user_metadata?.phone || "",
+            language: authUser.user_metadata?.language || "en"
+          })
+          .select("*")
+          .single();
+
+        if (fallbackInsert.error) {
+          throw fallbackInsert.error;
+        }
+        profile = fallbackInsert.data;
+      }
+
+      onLogin(session.access_token, {
+        id: profile.id,
+        name: profile.name,
+        email: profile.email,
+        role: profile.role,
+        points: profile.points,
+        phone: profile.phone,
+        language: profile.language,
+        preferences: profile.preferences
+      });
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Authentication failed");
+      setError(formatAuthError(requestError.message));
     }
   };
 
