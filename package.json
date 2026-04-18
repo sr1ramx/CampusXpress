@@ -3,10 +3,15 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm run build:frontend",
     "build:frontend": "npm --prefix frontend run build",
     "start:backend": "npm --prefix backend run start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   },
   "keywords": [],
   "author": "",
